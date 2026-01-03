@@ -39,6 +39,48 @@ export const explainLesson = async (
   }
 };
 
+export const generateDiagramContent = async (
+  language: Language,
+  topicTitle: string
+): Promise<{ imageUrl: string; explanation: string }> => {
+  const ai = new GoogleGenAI({ apiKey: API_KEY });
+  
+  // 1. Generate the Image
+  const imagePrompt = `A clear, educational scientific diagram for a 2nd secondary chemistry student about the topic: "${topicTitle}". The diagram should be professional, clean, and focus on the chemical structures, atomic models, or lab setups relevant to this topic. Use white background and clear labels.`;
+  
+  const imageResponse = await ai.models.generateContent({
+    model: 'gemini-2.5-flash-image',
+    contents: { parts: [{ text: imagePrompt }] },
+    config: { imageConfig: { aspectRatio: "16:9" } }
+  });
+
+  let imageUrl = "";
+  for (const part of imageResponse.candidates[0].content.parts) {
+    if (part.inlineData) {
+      imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+      break;
+    }
+  }
+
+  // 2. Generate the Explanation for the diagram
+  const explanationPrompt = `
+    بصفتك معلمة كيمياء، قومي بالتعليق على الرسم التوضيحي الذي يخص موضوع: ${topicTitle}.
+    اللغة: ${language === 'ar' ? 'العربية' : 'الإنجليزية'}.
+    اشرحي للطالب ما يراه في الرسم وكيف يرتبط هذا بالمفاهيم العلمية المقررة عليه بأسلوب هادئ ومشجع.
+    تجنبي الرموز المشتتة (النجوم، المربعات، إلخ).
+  `;
+
+  const textResponse = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: explanationPrompt,
+  });
+
+  return {
+    imageUrl,
+    explanation: textResponse.text || ""
+  };
+};
+
 export const generateTest = async (
   language: Language,
   unitTitle: string,
@@ -77,7 +119,6 @@ export const generateTest = async (
 export const generateSpeech = async (text: string, language: Language): Promise<string | undefined> => {
   const ai = new GoogleGenAI({ apiKey: API_KEY });
   
-  // تخصيص التعليمات للموديل بناءً على اللغة لضمان استجابة صوتية صحيحة
   const instruction = language === 'ar' 
     ? `تحدثي بصوت أنثوي، بهدوء شديد وببطء ووقار كمعلمة تشرح في الفصل، مع إعطاء فواصل قصيرة بين الجمل: ${text}`
     : `Speak in a calm, female voice, slowly and professionally like a teacher in a classroom, with short pauses between sentences: ${text}`;
@@ -90,7 +131,6 @@ export const generateSpeech = async (text: string, language: Language): Promise<
         responseModalities: [Modality.AUDIO],
         speechConfig: {
           voiceConfig: {
-            // Kore هو صوت نسائي هادئ يدعم لغات متعددة
             prebuiltVoiceConfig: { voiceName: 'Kore' },
           },
         },

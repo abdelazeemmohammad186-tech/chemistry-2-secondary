@@ -4,7 +4,7 @@ import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import LiveSession from './components/LiveSession';
 import { Language, Unit, Topic } from './types';
-import { explainLesson, generateSpeech, decodeAudio, generateTest } from './services/geminiService';
+import { explainLesson, generateSpeech, decodeAudio, generateTest, generateDiagramContent } from './services/geminiService';
 
 const App: React.FC = () => {
   const [language, setLanguage] = useState<Language>('ar');
@@ -12,11 +12,12 @@ const App: React.FC = () => {
   const [currentPart, setCurrentPart] = useState(1);
   const [explanation, setExplanation] = useState<string>("");
   const [testContent, setTestContent] = useState<string>("");
+  const [diagramData, setDiagramData] = useState<{ imageUrl: string; explanation: string } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [showLive, setShowLive] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
-  const [isTestMode, setIsTestMode] = useState(false);
+  const [viewMode, setViewMode] = useState<'explanation' | 'test' | 'diagram'>('explanation');
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
@@ -75,7 +76,8 @@ const App: React.FC = () => {
     setHasStarted(false);
     setExplanation("");
     setTestContent("");
-    setIsTestMode(false);
+    setDiagramData(null);
+    setViewMode('explanation');
   };
 
   const loadExplanation = useCallback(async (partOverride?: number) => {
@@ -85,7 +87,7 @@ const App: React.FC = () => {
     lastAudioRequestId.current++; 
     
     setIsLoading(true);
-    setIsTestMode(false);
+    setViewMode('explanation');
     const targetPart = partOverride || currentPart;
     
     const content = await explainLesson(
@@ -107,12 +109,29 @@ const App: React.FC = () => {
     }
   };
 
+  const handleRequestDiagram = async () => {
+    if (!selectedTopic) return;
+    stopSpeaking();
+    lastAudioRequestId.current++;
+    setIsLoading(true);
+    setViewMode('diagram');
+
+    const data = await generateDiagramContent(
+      language,
+      language === 'ar' ? selectedTopic.topic.titleAr : selectedTopic.topic.titleEn
+    );
+
+    setDiagramData(data);
+    setIsLoading(false);
+    playSpeech(data.explanation);
+  };
+
   const handleRequestTest = async () => {
     if (!selectedTopic) return;
     stopSpeaking();
     lastAudioRequestId.current++;
     setIsLoading(true);
-    setIsTestMode(true);
+    setViewMode('test');
     
     const test = await generateTest(
       language,
@@ -130,11 +149,11 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if (selectedTopic && hasStarted && !isTestMode) {
+    if (selectedTopic && hasStarted && viewMode === 'explanation') {
       loadExplanation();
     }
     return () => stopSpeaking();
-  }, [currentPart, hasStarted, selectedTopic, loadExplanation, isTestMode]);
+  }, [currentPart, hasStarted, selectedTopic, loadExplanation, viewMode]);
 
   return (
     <div className={`min-h-screen flex flex-col bg-slate-50 ${language === 'ar' ? 'rtl' : 'ltr'}`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
@@ -196,13 +215,13 @@ const App: React.FC = () => {
                           {language === 'ar' ? selectedTopic.unit.titleAr : selectedTopic.unit.titleEn}
                         </div>
                         <h2 className="text-xl font-bold">
-                          {isTestMode 
-                            ? (language === 'ar' ? 'اختبار شامل: ' : 'Comprehensive Test: ') + (language === 'ar' ? selectedTopic.topic.titleAr : selectedTopic.topic.titleEn)
-                            : (language === 'ar' ? selectedTopic.topic.titleAr : selectedTopic.topic.titleEn)}
+                          {viewMode === 'test' && (language === 'ar' ? 'اختبار شامل: ' : 'Comprehensive Test: ')}
+                          {viewMode === 'diagram' && (language === 'ar' ? 'رسم توضيحي: ' : 'Diagram Explanation: ')}
+                          {language === 'ar' ? selectedTopic.topic.titleAr : selectedTopic.topic.titleEn}
                         </h2>
                       </div>
                     </div>
-                    {!isTestMode && (
+                    {viewMode === 'explanation' && (
                       <div className="bg-teal-700/50 px-4 py-1.5 rounded-full text-sm font-bold border border-teal-500/30">
                         {language === 'ar' ? `الجزء ${currentPart} / 4` : `Part ${currentPart} / 4`}
                       </div>
@@ -214,16 +233,16 @@ const App: React.FC = () => {
                       <div className="flex flex-col items-center justify-center h-full py-20 space-y-6">
                         <div className="w-16 h-16 border-4 border-teal-100 border-t-teal-600 rounded-full animate-spin"></div>
                         <p className="text-teal-700 font-bold text-lg animate-pulse">
-                          {isTestMode 
-                            ? (language === 'ar' ? 'جاري إعداد الاختبار...' : 'Preparing the test...')
-                            : (language === 'ar' ? 'المعلمة تحضر المحتوى...' : 'Preparing content...')}
+                          {viewMode === 'test' ? (language === 'ar' ? 'جاري إعداد الاختبار...' : 'Preparing the test...') : 
+                           viewMode === 'diagram' ? (language === 'ar' ? 'جاري تجهيز الرسم والشرح...' : 'Preparing diagram and explanation...') :
+                           (language === 'ar' ? 'المعلمة تحضر المحتوى...' : 'Preparing content...')}
                         </p>
                       </div>
                     ) : (
                       <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
                         <div className="flex justify-end mb-4">
                            <button 
-                            onClick={() => isSpeaking ? stopSpeaking() : playSpeech(isTestMode ? testContent : explanation)}
+                            onClick={() => isSpeaking ? stopSpeaking() : playSpeech(viewMode === 'test' ? testContent : viewMode === 'diagram' ? diagramData?.explanation || "" : explanation)}
                             className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold transition-all active:scale-95 ${isSpeaking ? 'bg-red-50 text-red-600 border border-red-100 active:bg-red-100' : 'bg-teal-50 text-teal-600 border border-teal-100 hover:bg-teal-100 active:bg-teal-200'}`}
                            >
                              <span>{isSpeaking ? '⏹️' : '🔊'}</span>
@@ -232,16 +251,30 @@ const App: React.FC = () => {
                                : (language === 'ar' ? 'إعادة استماع' : 'Listen')}
                            </button>
                         </div>
-                        <div className="prose prose-teal max-w-none whitespace-pre-wrap leading-relaxed text-slate-700 text-lg mb-10 selection:bg-teal-100">
-                          {isTestMode ? testContent : explanation}
-                        </div>
+
+                        {viewMode === 'diagram' && diagramData && (
+                          <div className="mb-8 space-y-6">
+                            <div className="rounded-2xl overflow-hidden border border-slate-200 shadow-sm bg-slate-50">
+                              <img src={diagramData.imageUrl} alt="Chemistry Diagram" className="w-full h-auto object-contain max-h-[500px]" />
+                            </div>
+                            <div className="prose prose-teal max-w-none whitespace-pre-wrap leading-relaxed text-slate-700 text-lg selection:bg-teal-100">
+                              {diagramData.explanation}
+                            </div>
+                          </div>
+                        )}
+
+                        {viewMode !== 'diagram' && (
+                          <div className="prose prose-teal max-w-none whitespace-pre-wrap leading-relaxed text-slate-700 text-lg mb-10 selection:bg-teal-100">
+                            {viewMode === 'test' ? testContent : explanation}
+                          </div>
+                        )}
 
                         <div className="mt-12 border-t border-slate-100 pt-8">
                           <h4 className="font-bold text-slate-800 mb-4">
                             {language === 'ar' ? 'ماذا تريد مني الآن يا معلمتي؟' : 'What next, teacher?'}
                           </h4>
                           <div className="flex flex-wrap gap-3">
-                            {!isTestMode ? (
+                            {viewMode === 'explanation' ? (
                               <>
                                 {currentPart < 4 ? (
                                   <button 
@@ -260,6 +293,15 @@ const App: React.FC = () => {
                                     {language === 'ar' ? 'أريد اختباراً شاملاً على الدرس' : 'I want a comprehensive test'}
                                   </button>
                                 )}
+                                
+                                <button 
+                                  onClick={handleRequestDiagram}
+                                  className="bg-sky-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-sky-700 active:scale-95 active:bg-sky-800 transition-all shadow-md flex items-center gap-2"
+                                >
+                                  <span>🖼️</span>
+                                  {language === 'ar' ? 'وضحي بالرسم' : 'Explain with Diagram'}
+                                </button>
+
                                 <button 
                                   onClick={() => loadExplanation()}
                                   className="bg-white border-2 border-slate-200 text-slate-600 px-6 py-3 rounded-xl font-bold hover:bg-slate-50 active:scale-95 active:bg-slate-100 transition-all"
@@ -271,7 +313,7 @@ const App: React.FC = () => {
                               <button 
                                 onClick={() => {
                                   stopSpeaking();
-                                  setIsTestMode(false);
+                                  setViewMode('explanation');
                                 }}
                                 className="bg-teal-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-teal-700 active:scale-95 transition-all shadow-md"
                               >
@@ -284,7 +326,7 @@ const App: React.FC = () => {
                     )}
                   </div>
 
-                  {!isTestMode && (
+                  {viewMode === 'explanation' && (
                     <div className="bg-slate-50 px-6 py-4 border-t border-slate-100 flex items-center justify-between">
                       <button
                         onClick={() => {
