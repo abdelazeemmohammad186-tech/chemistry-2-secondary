@@ -1,0 +1,7 @@
+{
+  "name": "Chemistry AI Teacher - 2nd Secondary",
+  "description": "An interactive AI teacher for the 11th grade (Second Secondary) Chemistry curriculum, providing detailed explanations, solved examples, exercises, and live voice interaction in Arabic and English.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
